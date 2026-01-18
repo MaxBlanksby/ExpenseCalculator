@@ -199,6 +199,81 @@ def save_yearly_report(yearly_totals, output_folder='Reports'):
     print(f"\nYearly CSV report saved to {csv_file}")
 
 
+def create_individual_monthly_charts(data_by_month, output_folder='Reports', top_n=15):
+    """
+    Create individual pie charts for each month showing top merchants.
+    
+    Args:
+        data_by_month: Dictionary of DataFrames by month
+        top_n: Number of top merchants to show individually
+        output_folder: Folder to save charts
+    """
+    output_path = Path(output_folder)
+    output_path.mkdir(exist_ok=True)
+    
+    for month_name, df in data_by_month.items():
+        merchant_totals = analyze_monthly_expenses(df, month_name)
+        
+        if not merchant_totals:
+            continue
+        
+        # Get top N merchants and group the rest as "Other"
+        sorted_merchants = sorted(merchant_totals.items(), key=lambda x: x[1])[:top_n]
+        top_merchants = dict(sorted_merchants)
+        
+        # Calculate "Other" category if there are more merchants
+        if len(merchant_totals) > top_n:
+            other_total = sum(amount for merchant, amount in merchant_totals.items() 
+                            if merchant not in top_merchants)
+            top_merchants['Other'] = other_total
+        
+        # Convert to positive values for visualization
+        merchants = list(top_merchants.keys())
+        amounts = [-x for x in top_merchants.values()]
+        
+        # Create figure with two subplots: pie chart and bar chart
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+        
+        # Pie chart
+        colors = plt.cm.Set3(range(len(merchants)))
+        wedges, texts, autotexts = ax1.pie(amounts, labels=merchants, autopct='%1.1f%%',
+                                           startangle=90, colors=colors, pctdistance=0.85)
+        ax1.set_title(f'{month_name} - Expense Distribution', fontsize=14, fontweight='bold', pad=20)
+        
+        # Make percentage text bold
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(9)
+        
+        # Bar chart
+        bars = ax2.barh(range(len(merchants)), amounts, color=colors, 
+                        edgecolor='gray', linewidth=1)
+        ax2.set_yticks(range(len(merchants)))
+        ax2.set_yticklabels(merchants, fontsize=9)
+        ax2.set_xlabel('Amount Spent ($)', fontsize=11, fontweight='bold')
+        ax2.set_title(f'{month_name} - Top Merchants', fontsize=14, fontweight='bold', pad=20)
+        ax2.grid(axis='x', alpha=0.3, linestyle='--')
+        
+        # Add value labels on bars
+        for i, (bar, value) in enumerate(zip(bars, amounts)):
+            ax2.text(value + max(amounts)*0.01, bar.get_y() + bar.get_height()/2,
+                    f'${value:,.2f}', va='center', fontsize=9, fontweight='bold')
+        
+        # Add total at the top
+        total = sum(amounts)
+        fig.suptitle(f'Total Expenses: ${total:,.2f}', fontsize=16, fontweight='bold', y=0.98)
+        
+        plt.tight_layout()
+        
+        # Save chart
+        chart_file = output_path / f'{month_name}_chart.png'
+        plt.savefig(chart_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Chart saved for {month_name}")
+
+
 def create_monthly_expense_chart(monthly_totals, output_folder='Reports'):
     """
     Create a bar chart showing total expenses for each month.
@@ -362,6 +437,7 @@ def main():
     
     # Create visualizations
     print("\nGenerating charts...")
+    create_individual_monthly_charts(data_by_month)
     create_monthly_expense_chart(monthly_totals)
     create_top_merchants_chart(yearly_totals)
     
