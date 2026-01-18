@@ -1,6 +1,9 @@
 # Personal expense data - DO NOT COMMIT
-Csv/
-Reports/
+# Keep folders visible but ignore their contents
+Csv/*
+!Csv/.gitkeep
+Reports/*
+!Reports/.gitkeep
 
 # Python
 __pycache__/
