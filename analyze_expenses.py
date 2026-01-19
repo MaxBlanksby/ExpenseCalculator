@@ -54,9 +54,13 @@ def clean_merchant_name(payee):
     if pd.isna(payee):
         return "Unknown"
     
-    # Check if payee starts with HOP* and standardize to HOP TRIMET
+    # Check if payee starts with common prefixes and standardize to common names
     if str(payee).startswith('HOP*'):
         return "HOP TRIMET"
+    elif str(payee).startswith('Dropbox'):
+        return "Dropbox"
+    elif str(payee).startswith('GOOGLE *FI'):
+        return "Google Fi"
 
     # Remove extra spaces and convert to title case
     cleaned = ' '.join(payee.split())
