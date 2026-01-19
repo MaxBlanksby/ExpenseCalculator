@@ -54,6 +54,10 @@ def clean_merchant_name(payee):
     if pd.isna(payee):
         return "Unknown"
     
+    # Check if payee starts with HOP* and standardize to HOP TRIMET
+    if str(payee).startswith('HOP*'):
+        return "HOP TRIMET"
+
     # Remove extra spaces and convert to title case
     cleaned = ' '.join(payee.split())
     
