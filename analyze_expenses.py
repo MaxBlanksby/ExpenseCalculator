@@ -12,6 +12,78 @@ import json
 from collections import defaultdict
 
 
+def detect_csv_format(df, filename):
+    """
+    Detect the CSV format based on column names.
+    
+    Args:
+        df: DataFrame to analyze
+        filename: Name of the file for context
+        
+    Returns:
+        String indicating format: 'monthly', 'chase', 'citi', or 'unknown'
+    """
+    columns = set(df.columns)
+    
+    if 'Posted Date' in columns and 'Payee' in columns and 'Amount' in columns:
+        return 'monthly'
+    elif 'Transaction Date' in columns and 'Description' in columns and 'Amount' in columns:
+        return 'chase'
+    elif 'Date' in columns and 'Description' in columns and ('Debit' in columns or 'Credit' in columns):
+        return 'citi'
+    else:
+        return 'unknown'
+
+
+def normalize_csv_data(df, csv_format):
+    """
+    Normalize different CSV formats to a standard format with Date, Payee, Amount columns.
+    
+    Args:
+        df: DataFrame to normalize
+        csv_format: Detected format ('monthly', 'chase', 'citi')
+        
+    Returns:
+        Normalized DataFrame with Date, Payee, Amount columns
+    """
+    if csv_format == 'monthly':
+        normalized = pd.DataFrame({
+            'Date': pd.to_datetime(df['Posted Date'], format='%m/%d/%Y'),
+            'Payee': df['Payee'],
+            'Amount': df['Amount']
+        })
+    elif csv_format == 'chase':
+        normalized = pd.DataFrame({
+            'Date': pd.to_datetime(df['Transaction Date'], format='%m/%d/%Y'),
+            'Payee': df['Description'],
+            'Amount': df['Amount']
+        })
+    elif csv_format == 'citi':
+        # Citi has separate Debit/Credit columns
+        # Debit = money spent (positive in file, should be negative)
+        # Credit = refunds/payments (positive, should be positive or ignored)
+        amounts = []
+        for _, row in df.iterrows():
+            debit = row.get('Debit', 0)
+            credit = row.get('Credit', 0)
+            # Convert to float, handling NaN
+            debit = float(debit) if pd.notna(debit) else 0
+            credit = float(credit) if pd.notna(credit) else 0
+            # Debit is spending (make negative), Credit is refund (keep positive)
+            amount = -debit + credit
+            amounts.append(amount)
+        
+        normalized = pd.DataFrame({
+            'Date': pd.to_datetime(df['Date'], format='%m/%d/%Y'),
+            'Payee': df['Description'],
+            'Amount': amounts
+        })
+    else:
+        return None
+    
+    return normalized
+
+
 def read_csv_files(csv_folder='Csv'):
     """
     Read all CSV files from the specified folder.
@@ -39,6 +111,49 @@ def read_csv_files(csv_folder='Csv'):
             print(f"Error loading {file.name}: {e}")
     
     return data_by_month
+
+
+def read_all_csv_files_normalized(csv_folder='Csv'):
+    """
+    Read all CSV files from the specified folder and normalize them to a standard format.
+    Handles multiple CSV formats (monthly statements, Chase, Citi).
+    
+    Args:
+        csv_folder: Path to folder containing CSV files
+        
+    Returns:
+        Single DataFrame with all transactions normalized (Date, Payee, Amount)
+    """
+    csv_path = Path(csv_folder)
+    csv_files = sorted(csv_path.glob('*.csv')) + sorted(csv_path.glob('*.CSV'))
+    
+    all_transactions = []
+    
+    for file in csv_files:
+        try:
+            df = pd.read_csv(file)
+            csv_format = detect_csv_format(df, file.name)
+            
+            if csv_format == 'unknown':
+                print(f"Warning: Unknown format for {file.name}, skipping...")
+                continue
+            
+            normalized = normalize_csv_data(df, csv_format)
+            if normalized is not None:
+                all_transactions.append(normalized)
+                print(f"Loaded {file.name}: {len(normalized)} transactions ({csv_format} format)")
+        except Exception as e:
+            print(f"Error loading {file.name}: {e}")
+    
+    if all_transactions:
+        combined = pd.concat(all_transactions, ignore_index=True)
+        # Remove duplicates based on Date, Payee, Amount
+        combined = combined.drop_duplicates(subset=['Date', 'Payee', 'Amount'])
+        # Sort by date
+        combined = combined.sort_values('Date')
+        return combined
+    
+    return pd.DataFrame()
 
 
 def clean_merchant_name(payee):
@@ -136,6 +251,115 @@ def aggregate_yearly_expenses(data_by_month):
     
     # Sort by amount spent (most negative first)
     return dict(sorted(yearly_totals.items(), key=lambda x: x[1]))
+
+
+def create_payee_by_month_pivot(csv_folder='Csv', output_folder='Reports'):
+    """
+    Create a pivot table with payees as rows and months as columns.
+    Shows total spending at each payee per month with totals.
+    
+    Args:
+        csv_folder: Path to folder containing CSV files
+        output_folder: Folder to save the report
+        
+    Returns:
+        DataFrame with the pivot table
+    """
+    print("\n" + "=" * 80)
+    print("CREATING PAYEE BY MONTH PIVOT TABLE")
+    print("=" * 80)
+    
+    # Read all CSV files and normalize them
+    all_data = read_all_csv_files_normalized(csv_folder)
+    
+    if all_data.empty:
+        print("No data found!")
+        return None
+    
+    print(f"\nTotal transactions loaded: {len(all_data)}")
+    
+    # Filter to only expenses (negative amounts)
+    expenses = all_data[all_data['Amount'] < 0].copy()
+    print(f"Total expense transactions: {len(expenses)}")
+    
+    # Clean merchant names
+    expenses['Merchant'] = expenses['Payee'].apply(clean_merchant_name)
+    
+    # Extract month from date
+    expenses['Month'] = expenses['Date'].dt.month
+    expenses['Year'] = expenses['Date'].dt.year
+    
+    # Create pivot table: rows=Merchant, columns=Month, values=sum of Amount
+    pivot = expenses.pivot_table(
+        values='Amount',
+        index='Merchant',
+        columns='Month',
+        aggfunc='sum',
+        fill_value=0
+    )
+    
+    # Rename month columns to month names
+    month_names = {
+        1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr',
+        5: 'May', 6: 'Jun', 7: 'Jul', 8: 'Aug',
+        9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
+    }
+    
+    # Ensure all months are present (1-12), filling missing with 0
+    for month in range(1, 13):
+        if month not in pivot.columns:
+            pivot[month] = 0.0
+    
+    # Reorder columns to be Jan-Dec
+    pivot = pivot[[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
+    pivot.columns = [month_names[m] for m in pivot.columns]
+    
+    # Add Total column (row totals - yearly total per payee)
+    pivot['Total'] = pivot.sum(axis=1)
+    
+    # Sort by Total (most spending at top - since values are negative, sort ascending)
+    pivot = pivot.sort_values('Total', ascending=True)
+    
+    # Add totals row at bottom
+    totals_row = pivot.sum(axis=0)
+    totals_row.name = 'TOTAL'
+    pivot = pd.concat([pivot, pd.DataFrame([totals_row])])
+    
+    # Convert negative values to positive for display (optional - remove if you want to keep negatives)
+    pivot_display = pivot.abs()
+    
+    # Re-sort by Total descending (most spent first) after converting to positive
+    # Separate the TOTAL row, sort the rest, then add TOTAL back at bottom
+    total_row = pivot_display.loc[['TOTAL']]
+    data_rows = pivot_display.drop('TOTAL')
+    data_rows = data_rows.sort_values('Total', ascending=False)
+    pivot_display = pd.concat([data_rows, total_row])
+    
+    # Save to CSV
+    output_path = Path(output_folder)
+    output_path.mkdir(exist_ok=True)
+    
+    csv_file = output_path / 'payee_by_month_pivot.csv'
+    pivot_display.to_csv(csv_file, encoding='utf-8-sig')
+    print(f"\nPivot table saved to {csv_file}")
+    
+    # Also save as formatted text report
+    txt_file = output_path / 'payee_by_month_pivot.txt'
+    with open(txt_file, 'w') as f:
+        f.write("PAYEE BY MONTH EXPENSE SUMMARY\n")
+        f.write("=" * 150 + "\n\n")
+        f.write(pivot_display.to_string())
+        f.write("\n\n" + "=" * 150 + "\n")
+        f.write(f"\nTotal unique payees: {len(pivot) - 1}\n")
+        f.write(f"Total yearly expenses: ${pivot_display.loc['TOTAL', 'Total']:,.2f}\n")
+    print(f"Text report saved to {txt_file}")
+    
+    # Save as JSON
+    json_file = output_path / 'payee_by_month_pivot.json'
+    pivot_display.to_json(json_file, orient='index', indent=2)
+    print(f"JSON report saved to {json_file}")
+    
+    return pivot_display
 
 
 def save_monthly_reports(data_by_month, output_folder='Reports'):
@@ -443,6 +667,9 @@ def main():
     # Save yearly report
     save_yearly_report(yearly_totals)
     
+    # Create payee by month pivot table (includes all CSV formats)
+    pivot_table = create_payee_by_month_pivot('Csv', 'Reports')
+    
     # Create visualizations
     print("\nGenerating charts...")
     create_individual_monthly_charts(data_by_month)
@@ -451,6 +678,13 @@ def main():
     
     # Print summary
     print_summary(monthly_totals, yearly_totals)
+    
+    # Print pivot table preview
+    if pivot_table is not None:
+        print("\nPAYEE BY MONTH PIVOT TABLE (Top 20 payees):")
+        print("-" * 150)
+        print(pivot_table.head(20).to_string())
+        print("-" * 150)
     
     print("Analysis complete! Check the 'Reports' folder for detailed results.")
 
