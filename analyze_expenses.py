@@ -21,18 +21,24 @@ def detect_csv_format(df, filename):
         filename: Name of the file for context
         
     Returns:
-        String indicating format: 'monthly', 'chase', 'citi', or 'unknown'
+        String indicating format: 'monthly', 'prime', 'chase', 'citi', or 'unknown'
     """
     columns = set(df.columns)
     
     if 'Posted Date' in columns and 'Payee' in columns and 'Amount' in columns:
-        return 'monthly'
+        format_type = 'monthly'
     elif 'Transaction Date' in columns and 'Description' in columns and 'Amount' in columns:
-        return 'chase'
+        format_type = 'prime'
+    elif 'Posting Date' in columns and 'Description' in columns and 'Amount' in columns:
+        format_type = 'chase'
+    elif 'Date' in columns and 'Description' in columns and 'Amount' in columns:
+        format_type = 'keybank'
     elif 'Date' in columns and 'Description' in columns and ('Debit' in columns or 'Credit' in columns):
-        return 'citi'
+        format_type = 'citi'
     else:
-        return 'unknown'
+        format_type = 'unknown'
+    print(f"Detected CSV format for {filename}: {format_type}")
+    return format_type
 
 
 def normalize_csv_data(df, csv_format):
@@ -41,7 +47,7 @@ def normalize_csv_data(df, csv_format):
     
     Args:
         df: DataFrame to normalize
-        csv_format: Detected format ('monthly', 'chase', 'citi')
+        csv_format: Detected format ('monthly', 'prime', 'citi')
         
     Returns:
         Normalized DataFrame with Date, Payee, Amount columns
@@ -52,9 +58,21 @@ def normalize_csv_data(df, csv_format):
             'Payee': df['Payee'],
             'Amount': df['Amount']
         })
-    elif csv_format == 'chase':
+    elif csv_format == 'prime':
         normalized = pd.DataFrame({
             'Date': pd.to_datetime(df['Transaction Date'], format='%m/%d/%Y'),
+            'Payee': df['Description'],
+            'Amount': df['Amount']
+        })
+    elif csv_format == 'chase':
+        normalized = pd.DataFrame({
+            'Date': pd.to_datetime(df['Posting Date'], format='%m/%d/%y'),
+            'Payee': df['Description'],
+            'Amount': df['Amount']
+        })
+    elif csv_format == 'keybank':
+        normalized = pd.DataFrame({
+            'Date': pd.to_datetime(df['Date'], format='%m/%d/%y'),
             'Payee': df['Description'],
             'Amount': df['Amount']
         })
@@ -86,16 +104,16 @@ def normalize_csv_data(df, csv_format):
 
 def read_csv_files(csv_folder='Csv'):
     """
-    Read all CSV files from the specified folder.
+    Read all CSV files from the specified folder and normalize them.
     
     Args:
         csv_folder: Path to folder containing CSV files
         
     Returns:
-        Dictionary with month names as keys and DataFrames as values
+        Dictionary with month names as keys and normalized DataFrames as values
     """
     csv_path = Path(csv_folder)
-    csv_files = sorted(csv_path.glob('*.csv'))
+    csv_files = sorted(csv_path.glob('*.csv')) + sorted(csv_path.glob('*.CSV'))
     
     data_by_month = {}
     
@@ -105,8 +123,16 @@ def read_csv_files(csv_folder='Csv'):
         
         try:
             df = pd.read_csv(file)
-            data_by_month[month_name] = df
-            print(f"Loaded {file.name}: {len(df)} transactions")
+            csv_format = detect_csv_format(df, file.name)
+            
+            if csv_format == 'unknown':
+                print(f"Warning: Unknown format for {file.name}, skipping...")
+                continue
+            
+            normalized = normalize_csv_data(df, csv_format)
+            if normalized is not None:
+                data_by_month[month_name] = normalized
+                print(f"Loaded {file.name}: {len(normalized)} transactions ({csv_format} format)")
         except Exception as e:
             print(f"Error loading {file.name}: {e}")
     
@@ -116,7 +142,7 @@ def read_csv_files(csv_folder='Csv'):
 def read_all_csv_files_normalized(csv_folder='Csv'):
     """
     Read all CSV files from the specified folder and normalize them to a standard format.
-    Handles multiple CSV formats (monthly statements, Chase, Citi).
+    Handles multiple CSV formats (monthly statements, prime, Citi).
     
     Args:
         csv_folder: Path to folder containing CSV files
@@ -176,6 +202,72 @@ def clean_merchant_name(payee):
         return "Dropbox"
     elif str(payee).startswith('GOOGLE *FI'):
         return "Google Fi"
+    elif str(payee).startswith('SAFEWAY'):
+        return "Safeway"
+    elif str(payee).startswith('NORDSTROM'):
+        return "Nordstrom"
+    elif str(payee).startswith('NORDRACK'):
+        return "Nordstrom Rack"
+    elif str(payee).startswith('WALMART'):
+        return "Walmart"
+    elif str(payee).startswith('TARGET'):
+        return "Target"
+    elif str(payee).startswith('COSTCO'):
+        return "Costco"
+    elif str(payee).startswith('WHOLEFDS'):
+        return "Whole Foods"
+    elif str(payee).startswith('AMAZON'):
+        return "Amazon"
+    elif str(payee).startswith('AMZN'):
+        return "Amazon"
+    elif str(payee).startswith('Amazon'):
+        return "Amazon"
+    elif str(payee).startswith('Kindle'):
+        return "Kindle"
+    elif str(payee).startswith('Prime Video'):
+        return "Prime Video"
+    elif str(payee).startswith('EBAY'):
+        return "eBay"
+    elif str(payee).startswith('PAYPAL'):
+        return "PayPal"
+    elif str(payee).startswith('QANTAS'):
+        return "Qantus"
+    elif str(payee).startswith('ALASKA'):
+        return "Alaska Airlines"
+    elif str(payee).startswith('DELTA'):
+        return "Delta Airlines"
+    elif str(payee).startswith('UNITED'):
+        return "United Airlines"
+    elif str(payee).startswith('AMERICAN'):
+        return "American Airlines"
+    elif str(payee).startswith('SOUTHWEST'):
+        return "Southwest Airlines"
+    elif str(payee).startswith('UBER'):
+        return "Uber"
+    elif str(payee).startswith('LYFT'):
+        return "Lyft"
+    elif str(payee).startswith('DOORDASH'):
+        return "DoorDash"
+    elif str(payee).startswith('POSTMATE'):
+        return "Postmate"
+    elif str(payee).startswith('APPLE'):
+        return "Apple"
+    elif str(payee).startswith('CHEVRON'):
+        return "Chevron"
+    elif str(payee).startswith('SHELL'):
+        return "Shell"
+    elif str(payee).startswith('CVS'):
+        return "CVS"
+    elif str(payee).startswith('WALGREENS'):
+        return "Walgreens"
+    elif str(payee).startswith('WENDYS'):
+        return "Wendy's"
+    elif str(payee).startswith('MCDONALDS'):
+        return "McDonald's"
+    elif str(payee).startswith('BURGER KING'):
+        return "Burger King"
+    elif str(payee).startswith('THE UPS STORE'):
+        return "UPS Store"
 
     # Remove extra spaces and convert to title case
     cleaned = ' '.join(payee.split())
@@ -523,6 +615,11 @@ def create_monthly_expense_chart(monthly_totals, output_folder='Reports'):
     sorted_months = [m for m in month_order if m in monthly_totals]
     sorted_totals = [monthly_totals[m] for m in sorted_months]
     
+    # Check if there's any data to plot
+    if not sorted_months:
+        print("Warning: No monthly data found matching expected month format. Skipping monthly expense chart.")
+        return
+    
     # Convert to positive values for better visualization
     sorted_totals_positive = [-x for x in sorted_totals]
     
@@ -546,11 +643,12 @@ def create_monthly_expense_chart(monthly_totals, output_folder='Reports'):
         plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 50,
                 f'${value:,.0f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
     
-    # Add average line
-    avg_expense = sum(sorted_totals_positive) / len(sorted_totals_positive)
-    plt.axhline(y=avg_expense, color='#2E86AB', linestyle='--', linewidth=2, 
-                label=f'Average: ${avg_expense:,.0f}')
-    plt.legend()
+    # Add average line (only if there's data)
+    if len(sorted_totals_positive) > 0:
+        avg_expense = sum(sorted_totals_positive) / len(sorted_totals_positive)
+        plt.axhline(y=avg_expense, color='#2E86AB', linestyle='--', linewidth=2, 
+                    label=f'Average: ${avg_expense:,.0f}')
+        plt.legend()
     
     plt.tight_layout()
     
@@ -572,8 +670,22 @@ def create_top_merchants_chart(yearly_totals, top_n=15, output_folder='Reports')
         top_n: Number of top merchants to display
         output_folder: Folder to save chart
     """
+    # Check if yearly_totals is valid and not empty
+    if not yearly_totals or not isinstance(yearly_totals, dict):
+        print("Warning: No yearly totals data available. Skipping top merchants chart.")
+        return
+    
+    if len(yearly_totals) == 0:
+        print("Warning: Yearly totals dictionary is empty. Skipping top merchants chart.")
+        return
+    
     # Get top N merchants by spending
     sorted_merchants = sorted(yearly_totals.items(), key=lambda x: x[1])[:top_n]
+    
+    if not sorted_merchants:
+        print("Warning: No merchants found in yearly totals. Skipping top merchants chart.")
+        return
+    
     merchants = [m[0] for m in sorted_merchants]
     amounts = [-m[1] for m in sorted_merchants]  # Convert to positive
     
@@ -640,41 +752,47 @@ def print_summary(monthly_totals, yearly_totals):
 def main():
     """
     Main function to run the complete expense analysis.
+
+
     """
     print("Starting Expense Analysis...")
     print("-" * 80)
+
+    csv_folder = 'Csv Chase'
+    reports_folder = 'Reports Chase'
     
     # Read all CSV files
-    data_by_month = read_csv_files('Csv')
+    data_by_month = read_csv_files(csv_folder)
     
     if not data_by_month:
-        print("No CSV files found in the 'Csv' folder!")
+        print(f"No CSV files found in the '{csv_folder}' folder!")
         return
     
     print(f"\nLoaded {len(data_by_month)} months of data")
     
     # Calculate monthly totals
+    print("\nCalculating monthly totals...")
     monthly_totals = calculate_monthly_totals(data_by_month)
     
     # Save individual monthly reports
     print("\nGenerating monthly reports...")
-    save_monthly_reports(data_by_month)
+    save_monthly_reports(data_by_month, reports_folder)
     
     # Aggregate yearly expenses
     print("\nAggregating yearly expenses...")
     yearly_totals = aggregate_yearly_expenses(data_by_month)
     
     # Save yearly report
-    save_yearly_report(yearly_totals)
+    save_yearly_report(yearly_totals, reports_folder)
     
     # Create payee by month pivot table (includes all CSV formats)
-    pivot_table = create_payee_by_month_pivot('Csv', 'Reports')
+    pivot_table = create_payee_by_month_pivot(csv_folder, reports_folder)
     
     # Create visualizations
     print("\nGenerating charts...")
-    create_individual_monthly_charts(data_by_month)
-    create_monthly_expense_chart(monthly_totals)
-    create_top_merchants_chart(yearly_totals)
+    create_individual_monthly_charts(data_by_month, reports_folder)
+    create_monthly_expense_chart(monthly_totals, reports_folder)
+    create_top_merchants_chart(yearly_totals, output_folder=reports_folder)
     
     # Print summary
     print_summary(monthly_totals, yearly_totals)
@@ -686,7 +804,7 @@ def main():
         print(pivot_table.head(20).to_string())
         print("-" * 150)
     
-    print("Analysis complete! Check the 'Reports' folder for detailed results.")
+    print(f"Analysis complete! Check the '{reports_folder}' folder for detailed results.")
 
 
 if __name__ == "__main__":
